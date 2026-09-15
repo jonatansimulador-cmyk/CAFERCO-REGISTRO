@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cartera — Panel administrador</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="brand"><span class="dot"></span> Cartera</div>
+
+    <div class="nav-label">Resumen general</div>
+    <div class="stat"><span class="k">Total clientes</span><span class="v" id="statTotal">—</span></div>
+    <div class="stat"><span class="k">Asesores activos</span><span class="v" id="statAsesores">—</span></div>
+    <div class="stat"><span class="k">Ventas cerradas</span><span class="v" id="statVentas">—</span></div>
+    <div class="stat"><span class="k">Monto total</span><span class="v" id="statMonto">—</span></div>
+
+    <div class="who">
+      <div class="name">Administrador</div>
+      <div class="role">Acceso total</div>
+      <button class="btn btn-outline btn-sm logout" id="btnLogout">Cerrar sesión</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Panel del administrador</h1>
+        <p class="sub">Visualiza el registro de todos los asesores.</p>
+      </div>
+    </div>
+
+    <!-- Filtros -->
+    <div class="panel panel-pad">
+      <div class="filters">
+        <div class="field search">
+          <label>Buscar cliente</label>
+          <input type="text" id="fBusqueda" placeholder="Nombre o celular...">
+        </div>
+        <div class="field">
+          <label>Asesor</label>
+          <select id="fAsesor">
+            <option value="">Todos</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Estado</label>
+          <select id="fEstado">
+            <option value="">Todos</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Desde</label>
+          <input type="date" id="fFechaDesde">
+        </div>
+        <div class="field">
+          <label>Hasta</label>
+          <input type="date" id="fFechaHasta">
+        </div>
+        <div class="field" style="flex:0;">
+          <label>&nbsp;</label>
+          <button class="btn btn-outline" id="btnLimpiar">Limpiar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabla -->
+    <div class="panel" style="margin-top:18px;">
+      <div id="tableWrap">
+        <div class="loading-line">Cargando registros...</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script src="config.js"></script>
+<script>
+  const session = getSession();
+  if (!session || session.role !== 'admin') {
+    window.location.href = 'index.html';
+  }
+
+  document.getElementById('btnLogout').addEventListener('click', ()=>{
+    clearSession();
+    window.location.href = 'index.html';
+  });
+
+  const selEstadoFiltro = document.getElementById('fEstado');
+  ESTADOS.forEach(e=>{
+    selEstadoFiltro.insertAdjacentHTML('beforeend', `<option value="${e}">${e}</option>`);
+  });
+
+  let allClientes = [];
+
+  async function cargarDatos(){
+    document.getElementById('tableWrap').innerHTML = '<div class="loading-line">Cargando registros...</div>';
+    try {
+      allClientes = await sbGet('clientes', '?order=created_at.desc&select=*');
+      poblarAsesores();
+      renderTabla();
+      renderStats();
+    } catch (err) {
+      document.getElementById('tableWrap').innerHTML = '<div class="loading-line">No se pudo cargar la información. Verifica la conexión con Supabase.</div>';
+    }
+  }
+
+  function poblarAsesores(){
+    const sel = document.getElementById('fAsesor');
+    const actual = sel.value;
+    const nombres = [...new Set(allClientes.map(c=>c.asesor_nombre))].sort();
+    sel.innerHTML = '<option value="">Todos</option>' + nombres.map(n=>`<option value="${n}">${n}</option>`).join('');
+    sel.value = actual;
+  }
+
+  function renderStats(){
+    document.getElementById('statTotal').textContent = allClientes.length;
+    const asesores = new Set(allClientes.map(c=>c.asesor_dni));
+    document.getElementById('statAsesores').textContent = asesores.size;
+    const ventas = allClientes.filter(c=>c.estado === 'VENTA');
+    document.getElementById('statVentas').textContent = ventas.length;
+    const total = allClientes.reduce((sum,c)=>sum + Number(c.monto||0), 0);
+    document.getElementById('statMonto').textContent = formatSoles(total);
+  }
+
+  function getFiltered(){
+    const busqueda = document.getElementById('fBusqueda').value.trim().toLowerCase();
+    const asesor = document.getElementById('fAsesor').value;
+    const estado = document.getElementById('fEstado').value;
+    const desde = document.getElementById('fFechaDesde').value;
+    const hasta = document.getElementById('fFechaHasta').value;
+
+    return allClientes.filter(c=>{
+      if (busqueda && !(c.nombre.toLowerCase().includes(busqueda) || c.celular.includes(busqueda))) return false;
+      if (asesor && c.asesor_nombre !== asesor) return false;
+      if (estado && c.estado !== estado) return false;
+      if (desde && new Date(c.created_at) < new Date(desde)) return false;
+      if (hasta && new Date(c.created_at) > new Date(hasta + 'T23:59:59')) return false;
+      return true;
+    });
+  }
+
+  function estadoBg(estado){
+    const map = {
+      "EN CONVERSACION":"#EEF0F3","INTERESADO":"#FBF1DF","COTIZACION":"#FBEDE0",
+      "CORDINACION DE LA VENTA":"#EFECF8","SEGIMIENTO":"#E7F3F7","VENTA":"#E4F2EC"
+    };
+    return map[estado] || "#EEF0F3";
+  }
+  function estadoFg(estado){
+    const map = {
+      "EN CONVERSACION":"var(--estado-conversacion)","INTERESADO":"var(--estado-interesado)",
+      "COTIZACION":"var(--estado-cotizacion)","CORDINACION DE LA VENTA":"var(--estado-coordinacion)",
+      "SEGIMIENTO":"var(--estado-seguimiento)","VENTA":"var(--estado-venta)"
+    };
+    return map[estado] || "#7C8CA6";
+  }
+
+  function escapeHtml(str){
+    return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+
+  function renderTabla(){
+    const data = getFiltered();
+    const wrap = document.getElementById('tableWrap');
+
+    if (!data.length){
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <div class="big">No hay registros con estos filtros</div>
+          <div>Ajusta la búsqueda o revisa más tarde.</div>
+        </div>`;
+      return;
+    }
+
+    let rows = data.map(c => `
+      <tr>
+        <td class="cell-nombre">${escapeHtml(c.nombre)}</td>
+        <td>${escapeHtml(c.celular)}</td>
+        <td class="cell-monto">${formatSoles(c.monto)}</td>
+        <td><span class="badge" style="background:${estadoBg(c.estado)};color:${estadoFg(c.estado)}"><span class="d" style="background:${estadoFg(c.estado)}"></span>${c.estado}</span></td>
+        <td class="cell-muted">${escapeHtml(c.asesor_nombre)}</td>
+        <td class="cell-muted">${formatFecha(c.created_at)}</td>
+      </tr>
+    `).join('');
+
+    wrap.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>Celular</th>
+            <th>Monto</th>
+            <th>Estado</th>
+            <th>Asesor</th>
+            <th>Registrado</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  ['fBusqueda','fAsesor','fEstado','fFechaDesde','fFechaHasta'].forEach(id=>{
+    document.getElementById(id).addEventListener('input', renderTabla);
+  });
+  document.getElementById('btnLimpiar').addEventListener('click', ()=>{
+    document.getElementById('fBusqueda').value='';
+    document.getElementById('fAsesor').value='';
+    document.getElementById('fEstado').value='';
+    document.getElementById('fFechaDesde').value='';
+    document.getElementById('fFechaHasta').value='';
+    renderTabla();
+  });
+
+  cargarDatos();
+</script>
+</body>
+</html>

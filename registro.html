@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cartera — Mis clientes</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="brand"><span class="dot"></span> Cartera</div>
+
+    <div class="nav-label">Resumen</div>
+    <div class="stat"><span class="k">Total clientes</span><span class="v" id="statTotal">—</span></div>
+    <div class="stat"><span class="k">Ventas cerradas</span><span class="v" id="statVentas">—</span></div>
+    <div class="stat"><span class="k">Monto en cartera</span><span class="v" id="statMonto">—</span></div>
+
+    <div class="who">
+      <div class="name" id="whoNombre">—</div>
+      <div class="role" id="whoDni">Asesor</div>
+      <button class="btn btn-outline btn-sm logout" id="btnLogout">Cerrar sesión</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Mis clientes</h1>
+        <p class="sub">Registra y actualiza el estado de cada cliente en tu proceso de venta.</p>
+      </div>
+      <button class="btn btn-gold" id="btnNuevo">+ Nuevo cliente</button>
+    </div>
+
+    <!-- Filtros -->
+    <div class="panel panel-pad">
+      <div class="filters">
+        <div class="field search">
+          <label>Buscar cliente</label>
+          <input type="text" id="fBusqueda" placeholder="Nombre o celular...">
+        </div>
+        <div class="field">
+          <label>Estado</label>
+          <select id="fEstado">
+            <option value="">Todos</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Desde</label>
+          <input type="date" id="fFechaDesde">
+        </div>
+        <div class="field">
+          <label>Hasta</label>
+          <input type="date" id="fFechaHasta">
+        </div>
+        <div class="field" style="flex:0;">
+          <label>&nbsp;</label>
+          <button class="btn btn-outline" id="btnLimpiar">Limpiar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabla -->
+    <div class="panel" style="margin-top:18px;">
+      <div id="tableWrap">
+        <div class="loading-line">Cargando clientes...</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Modal Nuevo / Editar -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h2 id="modalTitle">Nuevo cliente</h2>
+    <form id="formCliente">
+      <input type="hidden" id="clienteId">
+      <div class="field">
+        <label for="cNombre">Nombre del cliente</label>
+        <input id="cNombre" type="text" required placeholder="Ej. Jorge Salazar">
+      </div>
+      <div class="field">
+        <label for="cCelular">Número de celular</label>
+        <input id="cCelular" type="text" inputmode="tel" required placeholder="Ej. 987654321">
+      </div>
+      <div class="field">
+        <label for="cMonto">Monto (S/)</label>
+        <input id="cMonto" type="number" step="0.01" min="0" required placeholder="Ej. 1500.00">
+      </div>
+      <div class="field">
+        <label for="cEstado">Estado</label>
+        <select id="cEstado" required></select>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-outline" id="btnCancelar">Cancelar</button>
+        <button type="submit" class="btn btn-primary" id="btnGuardar" style="width:auto;">Guardar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<script>
+  const session = getSession();
+  if (!session || session.role !== 'asesor') {
+    window.location.href = 'index.html';
+  }
+
+  document.getElementById('whoNombre').textContent = session.nombre;
+  document.getElementById('whoDni').textContent = 'DNI ' + session.dni;
+
+  document.getElementById('btnLogout').addEventListener('click', ()=>{
+    clearSession();
+    window.location.href = 'index.html';
+  });
+
+  // Poblar selects de estado
+  const selEstadoFiltro = document.getElementById('fEstado');
+  const selEstadoForm = document.getElementById('cEstado');
+  ESTADOS.forEach(e=>{
+    selEstadoFiltro.insertAdjacentHTML('beforeend', `<option value="${e}">${e}</option>`);
+    selEstadoForm.insertAdjacentHTML('beforeend', `<option value="${e}">${e}</option>`);
+  });
+
+  const badgeColor = {
+    "EN CONVERSACION":"estado-conversacion",
+    "INTERESADO":"estado-interesado",
+    "COTIZACION":"estado-cotizacion",
+    "CORDINACION DE LA VENTA":"estado-coordinacion",
+    "SEGIMIENTO":"estado-seguimiento",
+    "VENTA":"estado-venta",
+  };
+
+  let allClientes = [];
+
+  async function cargarClientes(){
+    document.getElementById('tableWrap').innerHTML = '<div class="loading-line">Cargando clientes...</div>';
+    try {
+      allClientes = await sbGet('clientes', `?asesor_dni=eq.${encodeURIComponent(session.dni)}&order=created_at.desc&select=*`);
+      renderTabla();
+      renderStats();
+    } catch (err) {
+      document.getElementById('tableWrap').innerHTML = '<div class="loading-line">No se pudo cargar la información. Verifica la conexión con Supabase.</div>';
+    }
+  }
+
+  function renderStats(){
+    document.getElementById('statTotal').textContent = allClientes.length;
+    const ventas = allClientes.filter(c=>c.estado === 'VENTA');
+    document.getElementById('statVentas').textContent = ventas.length;
+    const total = allClientes.reduce((sum,c)=>sum + Number(c.monto||0), 0);
+    document.getElementById('statMonto').textContent = formatSoles(total);
+  }
+
+  function getFiltered(){
+    const busqueda = document.getElementById('fBusqueda').value.trim().toLowerCase();
+    const estado = document.getElementById('fEstado').value;
+    const desde = document.getElementById('fFechaDesde').value;
+    const hasta = document.getElementById('fFechaHasta').value;
+
+    return allClientes.filter(c=>{
+      if (busqueda && !(c.nombre.toLowerCase().includes(busqueda) || c.celular.includes(busqueda))) return false;
+      if (estado && c.estado !== estado) return false;
+      if (desde && new Date(c.created_at) < new Date(desde)) return false;
+      if (hasta && new Date(c.created_at) > new Date(hasta + 'T23:59:59')) return false;
+      return true;
+    });
+  }
+
+  function renderTabla(){
+    const data = getFiltered();
+    const wrap = document.getElementById('tableWrap');
+
+    if (!data.length){
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <div class="big">Aún no hay clientes aquí</div>
+          <div>Agrega tu primer cliente o ajusta los filtros de búsqueda.</div>
+        </div>`;
+      return;
+    }
+
+    let rows = data.map(c => `
+      <tr data-id="${c.id}">
+        <td class="cell-nombre">${escapeHtml(c.nombre)}</td>
+        <td>${escapeHtml(c.celular)}</td>
+        <td class="cell-monto">${formatSoles(c.monto)}</td>
+        <td><span class="badge" style="background:${estadoBg(c.estado)};color:${estadoFg(c.estado)}"><span class="d" style="background:${estadoFg(c.estado)}"></span>${c.estado}</span></td>
+        <td class="cell-muted">${formatFecha(c.created_at)}</td>
+        <td>
+          <div class="row-actions">
+            <button class="btn btn-outline btn-sm" onclick="abrirEditar('${c.id}')">Editar</button>
+            <button class="btn btn-danger btn-sm" onclick="eliminarCliente('${c.id}')">Eliminar</button>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+    wrap.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>Celular</th>
+            <th>Monto</th>
+            <th>Estado</th>
+            <th>Registrado</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  }
+
+  function estadoBg(estado){
+    const map = {
+      "EN CONVERSACION":"#EEF0F3","INTERESADO":"#FBF1DF","COTIZACION":"#FBEDE0",
+      "CORDINACION DE LA VENTA":"#EFECF8","SEGIMIENTO":"#E7F3F7","VENTA":"#E4F2EC"
+    };
+    return map[estado] || "#EEF0F3";
+  }
+  function estadoFg(estado){
+    const map = {
+      "EN CONVERSACION":"var(--estado-conversacion)","INTERESADO":"var(--estado-interesado)",
+      "COTIZACION":"var(--estado-cotizacion)","CORDINACION DE LA VENTA":"var(--estado-coordinacion)",
+      "SEGIMIENTO":"var(--estado-seguimiento)","VENTA":"var(--estado-venta)"
+    };
+    return map[estado] || "#7C8CA6";
+  }
+
+  function escapeHtml(str){
+    return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+
+  // Filtros
+  ['fBusqueda','fEstado','fFechaDesde','fFechaHasta'].forEach(id=>{
+    document.getElementById(id).addEventListener('input', renderTabla);
+  });
+  document.getElementById('btnLimpiar').addEventListener('click', ()=>{
+    document.getElementById('fBusqueda').value='';
+    document.getElementById('fEstado').value='';
+    document.getElementById('fFechaDesde').value='';
+    document.getElementById('fFechaHasta').value='';
+    renderTabla();
+  });
+
+  // Modal
+  const overlay = document.getElementById('overlay');
+  const form = document.getElementById('formCliente');
+
+  document.getElementById('btnNuevo').addEventListener('click', ()=>{
+    document.getElementById('modalTitle').textContent = 'Nuevo cliente';
+    form.reset();
+    document.getElementById('clienteId').value = '';
+    selEstadoForm.value = 'EN CONVERSACION';
+    overlay.classList.add('show');
+  });
+
+  document.getElementById('btnCancelar').addEventListener('click', ()=> overlay.classList.remove('show'));
+  overlay.addEventListener('click', (e)=>{ if (e.target === overlay) overlay.classList.remove('show'); });
+
+  window.abrirEditar = function(id){
+    const c = allClientes.find(x=>x.id === id);
+    if (!c) return;
+    document.getElementById('modalTitle').textContent = 'Editar cliente';
+    document.getElementById('clienteId').value = c.id;
+    document.getElementById('cNombre').value = c.nombre;
+    document.getElementById('cCelular').value = c.celular;
+    document.getElementById('cMonto').value = c.monto;
+    selEstadoForm.value = c.estado;
+    overlay.classList.add('show');
+  };
+
+  window.eliminarCliente = async function(id){
+    if (!confirm('¿Eliminar este cliente de tu cartera?')) return;
+    try {
+      await sbDelete('clientes', `?id=eq.${id}`);
+      await cargarClientes();
+    } catch (err) {
+      alert('No se pudo eliminar el cliente.');
+    }
+  };
+
+  form.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const id = document.getElementById('clienteId').value;
+    const payload = {
+      nombre: document.getElementById('cNombre').value.trim(),
+      celular: document.getElementById('cCelular').value.trim(),
+      monto: parseFloat(document.getElementById('cMonto').value),
+      estado: selEstadoForm.value,
+    };
+
+    const btn = document.getElementById('btnGuardar');
+    btn.disabled = true; btn.textContent = 'Guardando...';
+
+    try {
+      if (id) {
+        payload.updated_at = new Date().toISOString();
+        await sbPatch('clientes', `?id=eq.${id}`, payload);
+      } else {
+        payload.asesor_dni = session.dni;
+        payload.asesor_nombre = session.nombre;
+        await sbPost('clientes', payload);
+      }
+      overlay.classList.remove('show');
+      await cargarClientes();
+    } catch (err) {
+      alert('No se pudo guardar el cliente.');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Guardar';
+    }
+  });
+
+  cargarClientes();
+</script>
+</body>
+</html>
