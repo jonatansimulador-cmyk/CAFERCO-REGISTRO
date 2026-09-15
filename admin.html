@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cartera — Panel administrador</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="brand"><span class="dot"></span> Cartera</div>
+
+    <div class="nav-label">Resumen general</div>
+    <div class="stat"><span class="k">Total clientes</span><span class="v" id="statTotal">—</span></div>
+    <div class="stat"><span class="k">Asesores activos</span><span class="v" id="statAsesores">—</span></div>
+    <div class="stat"><span class="k">Recurrentes</span><span class="v" id="statRecurrentes">—</span></div>
+    <div class="stat"><span class="k">Ventas cerradas</span><span class="v" id="statVentas">—</span></div>
+    <div class="stat"><span class="k">Monto total</span><span class="v" id="statMonto">—</span></div>
+
+    <div class="who">
+      <div class="name">Administrador</div>
+      <div class="role">Acceso total</div>
+      <button class="btn btn-outline btn-sm logout" id="btnLogout">Cerrar sesión</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1>Panel del administrador</h1>
+        <p class="sub">Visualiza el registro de todos los asesores.</p>
+      </div>
+    </div>
+
+    <div class="view-tabs" id="viewTabs">
+      <button class="active" data-view="activos">Todos los clientes</button>
+      <button data-view="recurrentes">Clientes recurrentes</button>
+    </div>
+
+    <!-- ==================== VISTA: ACTIVOS ==================== -->
+    <div id="viewActivos">
+      <div class="panel panel-pad">
+        <div class="filters">
+          <div class="field search">
+            <label>Buscar cliente</label>
+            <input type="text" id="fBusqueda" placeholder="Nombre o celular...">
+          </div>
+          <div class="field">
+            <label>Asesor</label>
+            <select id="fAsesor"><option value="">Todos</option></select>
+          </div>
+          <div class="field">
+            <label>Estado</label>
+            <select id="fEstado"><option value="">Todos</option></select>
+          </div>
+          <div class="field">
+            <label>Desde</label>
+            <input type="date" id="fFechaDesde">
+          </div>
+          <div class="field">
+            <label>Hasta</label>
+            <input type="date" id="fFechaHasta">
+          </div>
+          <div class="field" style="flex:0;">
+            <label>&nbsp;</label>
+            <button class="btn btn-outline" id="btnLimpiar">Limpiar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:18px;">
+        <div id="tableWrapActivos">
+          <div class="loading-line">Cargando registros...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== VISTA: RECURRENTES ==================== -->
+    <div id="viewRecurrentes" style="display:none;">
+      <div class="panel panel-pad">
+        <div class="filters">
+          <div class="field search">
+            <label>Buscar cliente o producto</label>
+            <input type="text" id="fBusquedaRec" placeholder="Nombre, celular o producto...">
+          </div>
+          <div class="field">
+            <label>Asesor</label>
+            <select id="fAsesorRec"><option value="">Todos</option></select>
+          </div>
+          <div class="field">
+            <label>Estado</label>
+            <select id="fEstadoRec"><option value="">Todos</option></select>
+          </div>
+          <div class="field">
+            <label>Desde</label>
+            <input type="date" id="fFechaDesdeRec">
+          </div>
+          <div class="field">
+            <label>Hasta</label>
+            <input type="date" id="fFechaHastaRec">
+          </div>
+          <div class="field" style="flex:0;">
+            <label>&nbsp;</label>
+            <button class="btn btn-outline" id="btnLimpiarRec">Limpiar</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:18px;">
+        <div id="tableWrapRecurrentes">
+          <div class="loading-line">Cargando clientes recurrentes...</div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script src="config.js"></script>
+<script>
+  const session = getSession();
+  if (!session || session.role !== 'admin') {
+    window.location.href = 'index.html';
+  }
+
+  document.getElementById('btnLogout').addEventListener('click', ()=>{
+    clearSession();
+    window.location.href = 'index.html';
+  });
+
+  ESTADOS.forEach(e=>{
+    document.getElementById('fEstado').insertAdjacentHTML('beforeend', `<option value="${e}">${e}</option>`);
+    document.getElementById('fEstadoRec').insertAdjacentHTML('beforeend', `<option value="${e}">${e}</option>`);
+  });
+
+  const estadoBgMap = {
+    "EN CONVERSACION":"#EEF0F3","INTERESADO":"#FBF1DF","COTIZACION":"#FBEDE0",
+    "CORDINACION DE LA VENTA":"#EFECF8","SEGIMIENTO":"#E7F3F7","VENTA":"#E4F2EC"
+  };
+  const estadoFgMap = {
+    "EN CONVERSACION":"var(--estado-conversacion)","INTERESADO":"var(--estado-interesado)",
+    "COTIZACION":"var(--estado-cotizacion)","CORDINACION DE LA VENTA":"var(--estado-coordinacion)",
+    "SEGIMIENTO":"var(--estado-seguimiento)","VENTA":"var(--estado-venta)"
+  };
+  function estadoBg(e){ return estadoBgMap[e] || "#EEF0F3"; }
+  function estadoFg(e){ return estadoFgMap[e] || "#7C8CA6"; }
+  function escapeHtml(str){
+    return String(str).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+  function badgeHtml(estado){
+    return `<span class="badge" style="background:${estadoBg(estado)};color:${estadoFg(estado)}"><span class="d" style="background:${estadoFg(estado)}"></span>${estado}</span>`;
+  }
+
+  // ---- Tabs de vista ----
+  document.querySelectorAll('#viewTabs button').forEach(btn=>{
+    btn.addEventListener('click', ()=> activarTab(btn.dataset.view));
+  });
+  function activarTab(tab){
+    document.querySelectorAll('#viewTabs button').forEach(b=>b.classList.toggle('active', b.dataset.view === tab));
+    document.getElementById('viewActivos').style.display = tab === 'activos' ? 'block' : 'none';
+    document.getElementById('viewRecurrentes').style.display = tab === 'recurrentes' ? 'block' : 'none';
+  }
+
+  let allClientes = [];
+  let productosPorCliente = {};
+
+  async function cargarDatos(){
+    document.getElementById('tableWrapActivos').innerHTML = '<div class="loading-line">Cargando registros...</div>';
+    document.getElementById('tableWrapRecurrentes').innerHTML = '<div class="loading-line">Cargando clientes recurrentes...</div>';
+    try {
+      allClientes = await sbGet('clientes', '?order=created_at.desc&select=*');
+
+      const recurrentIds = allClientes.filter(c=>c.es_recurrente).map(c=>c.id);
+      productosPorCliente = {};
+      if (recurrentIds.length) {
+        const productos = await sbGet('productos_cliente', `?cliente_id=in.(${recurrentIds.join(',')})&order=fecha.desc&select=*`);
+        productos.forEach(p=>{
+          if (!productosPorCliente[p.cliente_id]) productosPorCliente[p.cliente_id] = [];
+          productosPorCliente[p.cliente_id].push(p);
+        });
+      }
+
+      poblarAsesores();
+      renderActivos();
+      renderRecurrentes();
+      renderStats();
+    } catch (err) {
+      const msg = '<div class="loading-line">No se pudo cargar la información. Verifica la conexión con Supabase.</div>';
+      document.getElementById('tableWrapActivos').innerHTML = msg;
+      document.getElementById('tableWrapRecurrentes').innerHTML = msg;
+    }
+  }
+
+  function poblarAsesores(){
+    const nombres = [...new Set(allClientes.map(c=>c.asesor_nombre))].sort();
+    ['fAsesor','fAsesorRec'].forEach(id=>{
+      const sel = document.getElementById(id);
+      const actual = sel.value;
+      sel.innerHTML = '<option value="">Todos</option>' + nombres.map(n=>`<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('');
+      sel.value = actual;
+    });
+  }
+
+  function renderStats(){
+    document.getElementById('statTotal').textContent = allClientes.length;
+    document.getElementById('statAsesores').textContent = new Set(allClientes.map(c=>c.asesor_dni)).size;
+    document.getElementById('statRecurrentes').textContent = allClientes.filter(c=>c.es_recurrente).length;
+    document.getElementById('statVentas').textContent = allClientes.filter(c=>c.estado === 'VENTA').length;
+    const total = allClientes.reduce((sum,c)=>sum + Number(c.monto||0), 0);
+    document.getElementById('statMonto').textContent = formatSoles(total);
+  }
+
+  /* ---------------- VISTA ACTIVOS ---------------- */
+  function getFilteredActivos(){
+    const busqueda = document.getElementById('fBusqueda').value.trim().toLowerCase();
+    const asesor = document.getElementById('fAsesor').value;
+    const estado = document.getElementById('fEstado').value;
+    const desde = document.getElementById('fFechaDesde').value;
+    const hasta = document.getElementById('fFechaHasta').value;
+
+    return allClientes.filter(c=>{
+      if (busqueda && !(c.nombre.toLowerCase().includes(busqueda) || c.celular.includes(busqueda))) return false;
+      if (asesor && c.asesor_nombre !== asesor) return false;
+      if (estado && c.estado !== estado) return false;
+      if (desde && new Date(c.created_at) < new Date(desde)) return false;
+      if (hasta && new Date(c.created_at) > new Date(hasta + 'T23:59:59')) return false;
+      return true;
+    });
+  }
+
+  function renderActivos(){
+    const data = getFilteredActivos();
+    const wrap = document.getElementById('tableWrapActivos');
+
+    if (!data.length){
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <div class="big">No hay registros con estos filtros</div>
+          <div>Ajusta la búsqueda o revisa más tarde.</div>
+        </div>`;
+      return;
+    }
+
+    const rows = data.map(c => `
+      <tr>
+        <td class="cell-nombre">${escapeHtml(c.nombre)}</td>
+        <td>${escapeHtml(c.celular)}</td>
+        <td class="cell-monto">${formatSoles(c.monto)}</td>
+        <td>${badgeHtml(c.estado)}</td>
+        <td class="cell-muted">${escapeHtml(c.asesor_nombre)}</td>
+        <td class="cell-muted">${formatFecha(c.created_at)}</td>
+        <td>${c.es_recurrente ? `<span class="recurrente-tag"><span class="d"></span>Recurrente</span>` : ''}</td>
+      </tr>
+    `).join('');
+
+    wrap.innerHTML = `
+      <table>
+        <thead>
+          <tr><th>Cliente</th><th>Celular</th><th>Monto</th><th>Estado</th><th>Asesor</th><th>Registrado</th><th></th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  /* ---------------- VISTA RECURRENTES ---------------- */
+  function getFilteredRecurrentes(){
+    const busqueda = document.getElementById('fBusquedaRec').value.trim().toLowerCase();
+    const asesor = document.getElementById('fAsesorRec').value;
+    const estado = document.getElementById('fEstadoRec').value;
+    const desde = document.getElementById('fFechaDesdeRec').value;
+    const hasta = document.getElementById('fFechaHastaRec').value;
+
+    return allClientes.filter(c=>{
+      if (!c.es_recurrente) return false;
+      if (asesor && c.asesor_nombre !== asesor) return false;
+      if (estado && c.estado !== estado) return false;
+      if (desde && new Date(c.created_at) < new Date(desde)) return false;
+      if (hasta && new Date(c.created_at) > new Date(hasta + 'T23:59:59')) return false;
+      if (busqueda) {
+        const productos = (productosPorCliente[c.id] || []).map(p=>p.producto.toLowerCase()).join(' ');
+        const match = c.nombre.toLowerCase().includes(busqueda) || c.celular.includes(busqueda) || productos.includes(busqueda);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderRecurrentes(){
+    const data = getFilteredRecurrentes();
+    const wrap = document.getElementById('tableWrapRecurrentes');
+
+    if (!data.length){
+      wrap.innerHTML = `
+        <div class="empty-state">
+          <div class="big">No hay clientes recurrentes con estos filtros</div>
+          <div>Ajusta la búsqueda o revisa más tarde.</div>
+        </div>`;
+      return;
+    }
+
+    const rows = data.map(c=>{
+      const productos = productosPorCliente[c.id] || [];
+      const chips = productos.slice(0,3).map(p=>`<span class="product-chip">${escapeHtml(p.producto)}</span>`).join('');
+      const extra = productos.length > 3 ? `<span class="product-chip more">+${productos.length - 3}</span>` : '';
+      const listaProductos = productos.length ? `<div class="product-list">${chips}${extra}</div>` : `<span class="no-products">Sin productos registrados</span>`;
+
+      return `
+        <tr>
+          <td class="cell-nombre">${escapeHtml(c.nombre)}</td>
+          <td>${escapeHtml(c.celular)}</td>
+          <td>${badgeHtml(c.estado)}</td>
+          <td>${listaProductos}</td>
+          <td class="cell-muted">${escapeHtml(c.asesor_nombre)}</td>
+          <td class="cell-muted">${formatFecha(c.created_at)}</td>
+        </tr>`;
+    }).join('');
+
+    wrap.innerHTML = `
+      <table>
+        <thead>
+          <tr><th>Cliente</th><th>Celular</th><th>Estado</th><th>Productos</th><th>Asesor</th><th>Cliente desde</th></tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  ['fBusqueda','fAsesor','fEstado','fFechaDesde','fFechaHasta'].forEach(id=>{
+    document.getElementById(id).addEventListener('input', renderActivos);
+  });
+  document.getElementById('btnLimpiar').addEventListener('click', ()=>{
+    document.getElementById('fBusqueda').value='';
+    document.getElementById('fAsesor').value='';
+    document.getElementById('fEstado').value='';
+    document.getElementById('fFechaDesde').value='';
+    document.getElementById('fFechaHasta').value='';
+    renderActivos();
+  });
+
+  ['fBusquedaRec','fAsesorRec','fEstadoRec','fFechaDesdeRec','fFechaHastaRec'].forEach(id=>{
+    document.getElementById(id).addEventListener('input', renderRecurrentes);
+  });
+  document.getElementById('btnLimpiarRec').addEventListener('click', ()=>{
+    document.getElementById('fBusquedaRec').value='';
+    document.getElementById('fAsesorRec').value='';
+    document.getElementById('fEstadoRec').value='';
+    document.getElementById('fFechaDesdeRec').value='';
+    document.getElementById('fFechaHastaRec').value='';
+    renderRecurrentes();
+  });
+
+  cargarDatos();
+</script>
+</body>
+</html>
